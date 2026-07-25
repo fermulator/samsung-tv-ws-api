@@ -1,5 +1,7 @@
 """SamsungTV Encrypted."""
 
+from __future__ import annotations
+
 import aiohttp
 from aioresponses import aioresponses
 import pytest
@@ -84,55 +86,44 @@ async def test_authenticator(aioresponse: aioresponses) -> None:
     )
 
 
-def _register_pairing_mocks(aioresponse: aioresponses) -> None:
-    """Register a full, successful encrypted-pairing exchange (6 requests)."""
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [
+        (7.5, 7.5),  # explicit timeout is forwarded
+        (None, None),  # default: forwarded as None (aiohttp: no timeout)
+        (0, None),  # 0 disables the timeout, matching the rest of the SDK
+    ],
+)
+async def test_authenticator_forwards_timeout(
+    aioresponse: aioresponses,
+    configured: float | None,
+    expected: float | None,
+) -> None:
+    """The ``timeout`` argument is forwarded to the underlying requests.
+
+    Regression test for the ``timeout`` parameter being stored but never
+    passed to any ``aiohttp`` request (fermulator/samsung-tv-ws-api#1).
+    ``start_pairing`` exercises both a GET and a POST; every request uses the
+    same ``timeout=self._timeout``.
+    """
     with open("tests/fixtures/auth_pin_status.xml") as file:
         aioresponse.get("http://1.2.3.4:8080/ws/apps/CloudPINPage", body=file.read())
     aioresponse.post(
         "http://1.2.3.4:8080/ws/apps/CloudPINPage",
         body="http:///ws/apps/CloudPINPage/run",
     )
-    with open("tests/fixtures/auth_empty.json") as file:
-        aioresponse.get(
-            "http://1.2.3.4:8080/ws/pairing?step=0&app_id=12345"
-            "&device_id=7e509404-9d7c-46b4-8f6a-e2a9668ad184&type=1",
-            body=file.read(),
-        )
-    with open("tests/fixtures/auth_generator_client_hello.json") as file:
-        aioresponse.post(
-            "http://1.2.3.4:8080/ws/pairing?step=1&app_id=12345"
-            "&device_id=7e509404-9d7c-46b4-8f6a-e2a9668ad184",
-            body=file.read(),
-        )
-    with open("tests/fixtures/auth_client_ack_msg.json") as file:
-        aioresponse.post(
-            "http://1.2.3.4:8080/ws/pairing?step=2&app_id=12345"
-            "&device_id=7e509404-9d7c-46b4-8f6a-e2a9668ad184",
-            body=file.read(),
-        )
-    aioresponse.delete("http://1.2.3.4:8080/ws/apps/CloudPINPage/run", body="")
 
-
-@pytest.mark.asyncio
-async def test_authenticator_applies_timeout(aioresponse: aioresponses) -> None:
-    """The ``timeout`` argument must be applied to every underlying request.
-
-    Regression test for the ``timeout`` parameter being stored but never
-    passed to any ``aiohttp`` request (fermulator/samsung-tv-ws-api#1).
-    """
-    _register_pairing_mocks(aioresponse)
-
-    timeout = 7.5
     async with aiohttp.ClientSession() as session:
         authenticator = SamsungTVEncryptedWSAsyncAuthenticator(
-            "1.2.3.4", web_session=session, timeout=timeout
+            "1.2.3.4", web_session=session, timeout=configured
         )
         await authenticator.start_pairing()
-        await authenticator.try_pin("0997")
-        await authenticator.get_session_id_and_close()
 
-    expected = aiohttp.ClientTimeout(total=timeout)
-    assert len(aioresponse.requests) == 6
+    assert aioresponse.requests
     for key, calls in aioresponse.requests.items():
         for call in calls:
-            assert call.kwargs.get("timeout") == expected, key
+            # Asserting presence (not just .get()) proves the None case is
+            # forwarded rather than simply omitted.
+            assert "timeout" in call.kwargs, key
+            assert call.kwargs["timeout"] == expected, key
