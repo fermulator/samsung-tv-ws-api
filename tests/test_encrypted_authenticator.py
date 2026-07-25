@@ -174,6 +174,7 @@ async def test_pairing_errors_remain_catchable_as_exception(
         empty_body = file.read()
     authenticator = await _pair_until_step2(aioresponse, step2_body=empty_body)
 
-    # Existing callers doing `except Exception` keep working.
-    with pytest.raises(Exception):
+    # Existing callers doing `except Exception` keep working: the raised type
+    # is SamsungTVEncryptedError, which (asserted above) subclasses Exception.
+    with pytest.raises(SamsungTVEncryptedError):
         await authenticator.get_session_id_and_close()
