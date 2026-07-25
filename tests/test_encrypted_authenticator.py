@@ -82,3 +82,57 @@ async def test_authenticator(aioresponse: aioresponses) -> None:
         == '{"auth_Data":{"auth_type":"SPC","request_id":"0","ServerAckMsg":'
         '"01030000000000000000145F38EAFF0F6A6FF062CA652CD6CBAD9AF1EC62470000000000"}}'
     )
+
+
+def _register_pairing_mocks(aioresponse: aioresponses) -> None:
+    """Register a full, successful encrypted-pairing exchange (6 requests)."""
+    with open("tests/fixtures/auth_pin_status.xml") as file:
+        aioresponse.get("http://1.2.3.4:8080/ws/apps/CloudPINPage", body=file.read())
+    aioresponse.post(
+        "http://1.2.3.4:8080/ws/apps/CloudPINPage",
+        body="http:///ws/apps/CloudPINPage/run",
+    )
+    with open("tests/fixtures/auth_empty.json") as file:
+        aioresponse.get(
+            "http://1.2.3.4:8080/ws/pairing?step=0&app_id=12345"
+            "&device_id=7e509404-9d7c-46b4-8f6a-e2a9668ad184&type=1",
+            body=file.read(),
+        )
+    with open("tests/fixtures/auth_generator_client_hello.json") as file:
+        aioresponse.post(
+            "http://1.2.3.4:8080/ws/pairing?step=1&app_id=12345"
+            "&device_id=7e509404-9d7c-46b4-8f6a-e2a9668ad184",
+            body=file.read(),
+        )
+    with open("tests/fixtures/auth_client_ack_msg.json") as file:
+        aioresponse.post(
+            "http://1.2.3.4:8080/ws/pairing?step=2&app_id=12345"
+            "&device_id=7e509404-9d7c-46b4-8f6a-e2a9668ad184",
+            body=file.read(),
+        )
+    aioresponse.delete("http://1.2.3.4:8080/ws/apps/CloudPINPage/run", body="")
+
+
+@pytest.mark.asyncio
+async def test_authenticator_applies_timeout(aioresponse: aioresponses) -> None:
+    """The ``timeout`` argument must be applied to every underlying request.
+
+    Regression test for the ``timeout`` parameter being stored but never
+    passed to any ``aiohttp`` request (fermulator/samsung-tv-ws-api#1).
+    """
+    _register_pairing_mocks(aioresponse)
+
+    timeout = 7.5
+    async with aiohttp.ClientSession() as session:
+        authenticator = SamsungTVEncryptedWSAsyncAuthenticator(
+            "1.2.3.4", web_session=session, timeout=timeout
+        )
+        await authenticator.start_pairing()
+        await authenticator.try_pin("0997")
+        await authenticator.get_session_id_and_close()
+
+    expected = aiohttp.ClientTimeout(total=timeout)
+    assert len(aioresponse.requests) == 6
+    for key, calls in aioresponse.requests.items():
+        for call in calls:
+            assert call.kwargs.get("timeout") == expected, key
