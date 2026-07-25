@@ -6,6 +6,7 @@ import hashlib
 import logging
 import re
 import struct
+from typing import TypedDict
 
 import aiohttp
 from cryptography.hazmat.primitives.ciphers import (
@@ -283,6 +284,12 @@ def _parse_client_acknowledge(client_ack: str, skprime: bytes) -> bool:
     return client_ack == calculate_ack
 
 
+class _RequestKwargs(TypedDict, total=False):
+    """Optional keyword args forwarded to aiohttp requests."""
+
+    timeout: aiohttp.ClientTimeout
+
+
 class SamsungTVEncryptedWSAsyncAuthenticator:
     USER_ID = "654321"
     APP_ID = "12345"
@@ -299,8 +306,17 @@ class SamsungTVEncryptedWSAsyncAuthenticator:
         self._host = host
         self._web_session = web_session
         self._port = port
-        self._timeout = timeout
+        # Normalize into a ClientTimeout so it can be applied per-request.
+        # Left as None when the caller didn't set one, so we fall back to the
+        # session's own default rather than overriding it.
+        self._timeout = (
+            aiohttp.ClientTimeout(total=timeout) if timeout is not None else None
+        )
         self._sk_prime: bytes | None = None
+
+    def _req_kwargs(self) -> _RequestKwargs:
+        """Per-request kwargs, injecting the timeout only when one was set."""
+        return {"timeout": self._timeout} if self._timeout is not None else {}
 
     def _get_full_url(self, route: str) -> str:
         return f"http://{self._host}:{self._port}/{route}"
@@ -313,13 +329,15 @@ class SamsungTVEncryptedWSAsyncAuthenticator:
     async def _show_pin_page_on_tv(self) -> None:
         url = self._get_full_url("ws/apps/CloudPINPage")
         LOGGER.debug("Tx: POST %s", url)
-        async with self._web_session.post(url, data="pin4") as response:
+        async with self._web_session.post(
+            url, data="pin4", **self._req_kwargs()
+        ) as response:
             LOGGER.debug("Rx: %s", await response.text())
 
     async def _check_pin_page_on_tv(self) -> bool:
         url = self._get_full_url("ws/apps/CloudPINPage")
         LOGGER.debug("Tx: GET %s", url)
-        async with self._web_session.get(url) as response:
+        async with self._web_session.get(url, **self._req_kwargs()) as response:
             LOGGER.debug("Rx: %s", await response.text())
             page = await response.text()
         output = re.search("state>([^<>]*)</state>", page, flags=re.IGNORECASE)
@@ -340,7 +358,7 @@ class SamsungTVEncryptedWSAsyncAuthenticator:
     async def _first_step_of_pairing(self) -> None:
         url = self._get_full_request_url(0) + "&type=1"
         LOGGER.debug("Tx: GET %s", url)
-        async with self._web_session.get(url) as response:
+        async with self._web_session.get(url, **self._req_kwargs()) as response:
             LOGGER.debug("Rx: %s", await response.text())
 
     async def _second_step_of_pairing(self, pin: str) -> dict[str, bytes] | None:
@@ -355,7 +373,9 @@ class SamsungTVEncryptedWSAsyncAuthenticator:
         )
         url = self._get_full_request_url(1)
         LOGGER.debug("Tx: POST %s", url)
-        async with self._web_session.post(url, data=content) as response:
+        async with self._web_session.post(
+            url, data=content, **self._req_kwargs()
+        ) as response:
             LOGGER.debug("Rx: %s", await response.text())
             response_text = await response.text()
 
@@ -398,7 +418,9 @@ class SamsungTVEncryptedWSAsyncAuthenticator:
         )
         url = self._get_full_request_url(2)
         LOGGER.debug("Tx: POST %s", url)
-        async with self._web_session.post(url, data=content) as response:
+        async with self._web_session.post(
+            url, data=content, **self._req_kwargs()
+        ) as response:
             LOGGER.debug("Rx: %s", await response.text())
             response_text = await response.text()
 
@@ -426,7 +448,7 @@ class SamsungTVEncryptedWSAsyncAuthenticator:
     async def _close_pin_page_on_tv(self) -> None:
         url = self._get_full_url("ws/apps/CloudPINPage/run")
         LOGGER.debug("Tx: DELETE %s", url)
-        async with self._web_session.delete(url) as response:
+        async with self._web_session.delete(url, **self._req_kwargs()) as response:
             LOGGER.debug("Rx: %s", await response.text())
 
     async def get_session_id_and_close(self) -> str:
