@@ -44,6 +44,12 @@ dev = [
     "pytest>=8.3.3",
     "pytest-asyncio>=0.24",
     "aioresponses>=0.7.7",
+    # aioresponses 0.7.9 (its latest release) is incompatible with aiohttp 3.14
+    # (ClientResponse now requires stream_writer), which breaks the test suite.
+    # Cap aiohttp in the dev/test env only; the runtime `async` extra above stays
+    # uncapped, so end users are unaffected. Drop once the fix ships:
+    # https://github.com/pnuckowski/aioresponses/pull/288
+    "aiohttp<3.14",
 ]
 
 [project.scripts]
