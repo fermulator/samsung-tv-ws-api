@@ -300,7 +300,7 @@ class SamsungTVEncryptedWSAsyncAuthenticator:
         self._web_session = web_session
         self._port = port
         # timeout=0 disables the timeout (-> None), matching the rest of the SDK.
-        self._timeout = None if timeout == 0 else timeout
+        self._timeout: float | None = None if timeout == 0 else timeout
         self._sk_prime: bytes | None = None
 
     def _get_full_url(self, route: str) -> str:
