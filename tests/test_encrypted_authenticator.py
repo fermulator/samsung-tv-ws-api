@@ -1,5 +1,7 @@
 """SamsungTV Encrypted."""
 
+from __future__ import annotations
+
 import aiohttp
 from aioresponses import aioresponses
 import pytest
@@ -82,3 +84,46 @@ async def test_authenticator(aioresponse: aioresponses) -> None:
         == '{"auth_Data":{"auth_type":"SPC","request_id":"0","ServerAckMsg":'
         '"01030000000000000000145F38EAFF0F6A6FF062CA652CD6CBAD9AF1EC62470000000000"}}'
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [
+        (7.5, 7.5),  # explicit timeout is forwarded
+        (None, None),  # default: forwarded as None (aiohttp: no timeout)
+        (0, None),  # 0 disables the timeout, matching the rest of the SDK
+    ],
+)
+async def test_authenticator_forwards_timeout(
+    aioresponse: aioresponses,
+    configured: float | None,
+    expected: float | None,
+) -> None:
+    """The ``timeout`` argument is forwarded to the underlying requests.
+
+    Regression test for the ``timeout`` parameter being stored but never
+    passed to any ``aiohttp`` request (fermulator/samsung-tv-ws-api#1).
+    ``start_pairing`` exercises both a GET and a POST; every request uses the
+    same ``timeout=self._timeout``.
+    """
+    with open("tests/fixtures/auth_pin_status.xml") as file:
+        aioresponse.get("http://1.2.3.4:8080/ws/apps/CloudPINPage", body=file.read())
+    aioresponse.post(
+        "http://1.2.3.4:8080/ws/apps/CloudPINPage",
+        body="http:///ws/apps/CloudPINPage/run",
+    )
+
+    async with aiohttp.ClientSession() as session:
+        authenticator = SamsungTVEncryptedWSAsyncAuthenticator(
+            "1.2.3.4", web_session=session, timeout=configured
+        )
+        await authenticator.start_pairing()
+
+    assert aioresponse.requests
+    for key, calls in aioresponse.requests.items():
+        for call in calls:
+            # Asserting presence (not just .get()) proves the None case is
+            # forwarded rather than simply omitted.
+            assert "timeout" in call.kwargs, key
+            assert call.kwargs["timeout"] == expected, key

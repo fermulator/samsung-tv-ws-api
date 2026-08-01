@@ -60,7 +60,7 @@ class SamsungTVEncryptedWSAsyncRemote:
         if token and session_id:
             self._session = SamsungTVEncryptedSession(token, session_id)
 
-        self._timeout = None if timeout == 0 else timeout
+        self._timeout: float | None = None if timeout == 0 else timeout
         self._web_session = web_session
         self._connection = None
         self._recv_loop = None
