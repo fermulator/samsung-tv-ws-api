@@ -2,8 +2,9 @@
 
 from unittest.mock import Mock, patch
 
-from aioresponses import aioresponses
+from aiointercept import aiointercept
 import pytest
+import pytest_asyncio
 from websockets.asyncio.client import ClientConnection
 
 
@@ -47,7 +48,7 @@ def get_async_connection():
         yield connection
 
 
-@pytest.fixture(name="aioresponse")
-def mock_aioresponse():
-    with aioresponses() as m:
+@pytest_asyncio.fixture(name="aiointercept_mock")
+async def mock_aiointercept():
+    async with aiointercept(mock_external_urls=True) as m:
         yield m
