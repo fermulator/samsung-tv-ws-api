@@ -1,5 +1,9 @@
 """SamsungTV Encrypted."""
 
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock
+
 import aiohttp
 from aiointercept import aiointercept
 import pytest
@@ -86,3 +90,53 @@ async def test_authenticator(aiointercept_mock: aiointercept) -> None:
         == '{"auth_Data":{"auth_type":"SPC","request_id":"0","ServerAckMsg":'
         '"01030000000000000000145F38EAFF0F6A6FF062CA652CD6CBAD9AF1EC62470000000000"}}'
     )
+
+
+def _mock_session(get_body: str) -> MagicMock:
+    """Mock aiohttp session whose get/post act as async context managers.
+
+    aiointercept drops client-only kwargs like ``timeout=`` from its captured
+    requests, so the timeout wiring is asserted directly against the session
+    rather than through the mock server.
+    """
+
+    def _response(body: str) -> MagicMock:
+        response = MagicMock()
+        response.text = AsyncMock(return_value=body)
+        ctx = MagicMock()
+        ctx.__aenter__ = AsyncMock(return_value=response)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        return ctx
+
+    session = MagicMock()
+    session.get = MagicMock(return_value=_response(get_body))
+    session.post = MagicMock(return_value=_response(""))
+    return session
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [
+        (7.5, 7.5),  # explicit timeout is forwarded
+        (None, None),  # default: forwarded as None (aiohttp: no timeout)
+        (0, None),  # 0 disables the timeout, matching the rest of the SDK
+    ],
+)
+async def test_authenticator_forwards_timeout(
+    configured: float | None, expected: float | None
+) -> None:
+    """The configured timeout is forwarded to the underlying requests.
+
+    Regression test for fermulator/samsung-tv-ws-api#1. ``start_pairing`` issues
+    a GET (state check) and a POST (show PIN); both must carry ``timeout``.
+    """
+    session = _mock_session("<state>stopped</state>")
+    authenticator = SamsungTVEncryptedWSAsyncAuthenticator(
+        "samsungtv.test", web_session=session, timeout=configured
+    )
+
+    await authenticator.start_pairing()
+
+    assert session.get.call_args.kwargs["timeout"] == expected
+    assert session.post.call_args.kwargs["timeout"] == expected
