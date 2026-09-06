@@ -1,6 +1,5 @@
 """Tests for yarl-based URL building, specifically IPv6 host with port."""
 
-from typing import Optional
 from unittest.mock import Mock
 
 import aiohttp
@@ -50,11 +49,11 @@ IPV6_HOST = "::1"
 )
 def test_base_conn_url_ipv6(
     port: int,
-    token: Optional[str],
+    token: str | None,
     method: str,
     args: tuple,
     expected_prefix: str,
-    extra_in: Optional[str],
+    extra_in: str | None,
 ) -> None:
     """IPv6 host must be bracketed in all SamsungTVWSBaseConnection URLs."""
     conn = SamsungTVWSBaseConnection(
@@ -89,7 +88,7 @@ def test_encrypted_url_ipv6(
     method: str,
     args: tuple,
     expected_prefix: str,
-    extra_in: Optional[str],
+    extra_in: str | None,
 ) -> None:
     """IPv6 host must be bracketed in all SamsungTVEncryptedWSAsyncRemote URLs."""
     remote = SamsungTVEncryptedWSAsyncRemote(
